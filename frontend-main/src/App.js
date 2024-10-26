@@ -1,80 +1,303 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import axios from 'axios';
+import ReactMarkdown from 'react-markdown';
+import { AlertTriangle, Heart, Activity, Brain } from 'lucide-react';
 import './App.css';
 
-const App = () => {
-  const [message, setMessage] = useState('');
-  const [chat, setChat] = useState([]);
-  const [context, setContext] = useState('');
+const QUESTIONS = {
+  healthAnalysis: [
+    "What's your age?",
+    "What's your weight (in kg)?",
+    "What's your height (in cm)?",
+    "What's your typical blood pressure (systolic/diastolic)?",
+    "What's your typical heart rate?",
+    "Do you have any family history of chronic diseases?",
+    "Can you describe your typical daily diet?",
+    "How many hours do you sleep on average?",
+    "Do you have any known medical conditions?",
+    "How would you describe your daily activity level?",
+  ],
+  friendlyCompanion: [
+    "How are you feeling today? (1-10)",
+    "Could you tell me what's been on your mind lately?",
+    "How has your sleep been recently?",
+    "What are your stress levels like? (1-10)",
+    "Have you been able to maintain your daily routines?",
+    "Is there anything specific you'd like support with today?",
+  ],
+};
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    const newChat = { user: message };
-    setChat((prev) => [...prev, newChat]);
+const ChatApp = () => {
+  const [activeTab, setActiveTab] = useState('healthAnalysis');
+  const [input, setInput] = useState('');
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [userData, setUserData] = useState({
+    healthAnalysis: {},
+    friendlyCompanion: {},
+  });
+  const [messages, setMessages] = useState({
+    healthAnalysis: [],
+    friendlyCompanion: [],
+    emergencySupport: [],
+  });
+  const [emergency, setEmergency] = useState(false);
+  const [isInteracting, setIsInteracting] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [stream, setStream] = useState(null);
+  const messagesEndRef = useRef(null);
+  const videoRef = useRef(null);
 
-    try {
-      // Use fetch to handle the streaming response
-      const response = await fetch('https://3e93-34-80-147-122.ngrok-free.app/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, context })
+  const handleEmergency = () => {
+    setEmergency(true);
+  };
+
+  const startEmergencyCall = () => {
+    setIsConnecting(true);
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(mediaStream => {
+        setStream(mediaStream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
+      })
+      .catch(error => {
+        console.error("Error accessing webcam: ", error);
+        setMessages(prev => ({
+          ...prev,
+          emergencySupport: [...prev.emergencySupport, {
+            sender: 'bot',
+            text: 'Unable to access webcam. Please ensure you have granted camera permissions.',
+          }],
+        }));
       });
+  };
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let done = false;
-      let botResponse = '';
+  const sendMessage = async () => {
+    if (input.trim() === '') return;
 
-      while (!done) {
-        const { value, done: streamDone } = await reader.read();
-        done = streamDone;
-        if (value) {
-          // Decode and parse each chunk of streamed data
-          const chunk = decoder.decode(value, { stream: true });
-          const parts = chunk.split("\n\n").filter(Boolean); // Split by double newline and ignore empty parts
-          parts.forEach(part => {
-            if (part.startsWith("data:")) {
-              const data = part.slice(5).trim(); // Remove "data:" prefix
-              botResponse += data + ' ';
-            }
+    const userMessage = { sender: 'user', text: input };
+    setMessages(prev => ({
+      ...prev,
+      [activeTab]: [...prev[activeTab], userMessage],
+    }));
+
+    if (activeTab === 'emergencySupport') {
+      startEmergencyCall();
+      setInput('');
+      setTimeout(() => {
+        setMessages(prev => ({
+          ...prev,
+          [activeTab]: [...prev[activeTab], { sender: 'bot', text: "Searching for available doctor..." }],
+        }));
+      }, 3000);
+      return;
+    }
+
+    if (isInteracting) {
+      // Send the user message to Gemini AI
+      try {
+        const geminiResponse = await axios.post('http://localhost:5000/api/gemini-ai', {
+          userInput: JSON.stringify({
+            type: activeTab,
+            data: userData[activeTab],
+            userMessage: input,
+          }),
+          userData: userData[activeTab],
+        });
+
+        if (geminiResponse.data && geminiResponse.data.result) {
+          setMessages(prev => ({
+            ...prev,
+            [activeTab]: [...prev[activeTab], {
+              sender: 'bot',
+              text: geminiResponse.data.result,
+            }],
+          }));
+        }
+      } catch (error) {
+        console.error("Error during Gemini API call:", error);
+        setMessages(prev => ({
+          ...prev,
+          [activeTab]: [...prev[activeTab], {
+            sender: 'bot',
+            text: 'I apologize, but there was an error processing your message. Please try again.',
+          }],
+        }));
+      }
+    } else {
+      // Handle the regular question answering flow
+      const newData = {
+        ...userData[activeTab],
+        [QUESTIONS[activeTab][questionIndex]]: input,
+        timestamp: new Date().toISOString(),
+      };
+
+      setUserData(prev => ({
+        ...prev,
+        [activeTab]: newData,
+      }));
+
+      setInput('');
+
+      if (questionIndex < QUESTIONS[activeTab].length - 1) {
+        const nextQuestion = QUESTIONS[activeTab][questionIndex + 1];
+        setMessages(prev => ({
+          ...prev,
+          [activeTab]: [...prev[activeTab], { sender: 'bot', text: nextQuestion }],
+        }));
+        setQuestionIndex(questionIndex + 1);
+      } else {
+        // API call for analysis
+        try {
+          const analysisResponse = await axios.post('http://localhost:5000/api/analyze-text', {
+            prompt: `As Dr. Garuda, provide ${activeTab === 'healthAnalysis' ? 'a comprehensive health analysis' : 'compassionate mental health support'} based on: ${JSON.stringify(newData)}`,
+            type: activeTab,
+            userData: newData,
           });
+
+          if (analysisResponse.data.emergency) {
+            handleEmergency();
+          }
+
+          setMessages(prev => ({
+            ...prev,
+            [activeTab]: [...prev[activeTab], {
+              sender: 'bot',
+              text: analysisResponse.data.result,
+              emergency: analysisResponse.data.emergency,
+            }],
+          }));
+
+          // Switch to interaction mode with Gemini AI
+          setIsInteracting(true);
+          setQuestionIndex(0);
+        } catch (error) {
+          console.error("Error during API call:", error);
+          setMessages(prev => ({
+            ...prev,
+            [activeTab]: [...prev[activeTab], {
+              sender: 'bot',
+              text: 'I apologize, but there was an error processing your information. Please try again.',
+            }],
+          }));
         }
       }
-
-      // Update chat and context after receiving full response
-      setContext((prevContext) => `${prevContext}\nBot: ${botResponse.trim()}`);
-      setChat((prev) => [...prev, { bot: botResponse.trim() }]);
-      setMessage('');
-    } catch (error) {
-      console.error('Error sending message:', error);
     }
+
+    scrollToBottom();
   };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  useEffect(() => {
+    if (!messages[activeTab]?.length) {
+      setMessages(prev => ({
+        ...prev,
+        [activeTab]: [{ sender: 'bot', text: QUESTIONS[activeTab]?.[0] || '' }]
+      }));
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [stream]);
 
   return (
     <div className="chat-container">
-      <h1>Health & Wellness Chatbot</h1>
-      <div className="chat-box">
-        {chat.map((entry, index) => (
-          <div key={index} className={`chat-entry ${entry.user ? 'user' : 'bot'}`}>
-            {entry.user ? (
-              <span className="user-message">{entry.user}</span>
-            ) : (
-              <span className="bot-message">{entry.bot}</span>
-            )}
+      <div className="header">
+        <h1 className="app-title">
+          <Heart className="inline-block mr-2" />
+          Garuda Health AI
+        </h1>
+        {emergency && (
+          <div className="emergency-alert">
+            <AlertTriangle className="inline-block mr-2" />
+            Emergency Resources Available
           </div>
-        ))}
+        )}
       </div>
-      <form onSubmit={handleSendMessage} className="chat-form">
+
+      <div className="tab-selector">
+        <button
+          onClick={() => setActiveTab('healthAnalysis')}
+          className={`tab ${activeTab === 'healthAnalysis' ? 'active' : ''}`}
+        >
+          <Activity className="inline-block mr-2" />
+          Health Analysis
+        </button>
+        <button
+          onClick={() => setActiveTab('friendlyCompanion')}
+          className={`tab ${activeTab === 'friendlyCompanion' ? 'active' : ''}`}
+        >
+          <Brain className="inline-block mr-2" />
+          Mental Health Support
+        </button>
+        <button
+          onClick={() => setActiveTab('emergencySupport')}
+          className={`tab ${activeTab === 'emergencySupport' ? 'active' : ''}`}
+        >
+          <AlertTriangle className="inline-block mr-2" />
+          Emergency Support
+        </button>
+      </div>
+
+      <div className="chat-content">
+        <div className="chat-box">
+          {messages[activeTab].map((msg, index) => (
+            <div key={index} className={`chat-entry ${msg.sender}`}>
+              <div className={`message ${msg.sender === 'user' ? 'user-message' : 'bot-message'}`}>
+                <ReactMarkdown>{msg.text}</ReactMarkdown>
+                {msg.emergency && (
+                  <div className="emergency-resources">
+                    <h4>Emergency Resources:</h4>
+                    <ul>
+                      <li>Crisis Hotline: 988</li>
+                      <li>Emergency: 911</li>
+                      <li>Text Crisis Line: Text HOME to 741741</li>
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+
+      {activeTab === 'emergencySupport' && isConnecting && (
+        <div className="video-call-ui">
+          <div className="video-placeholder">
+            <video ref={videoRef} autoPlay muted className="video-feed" />
+          </div>
+          <div className="loading-message">Searching for doctor...</div>
+        </div>
+      )}
+
+      <div className="chat-form">
         <input
           type="text"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Type your message..."
-          required
+          placeholder="Type your response..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+          className="chat-input"
         />
-        <button type="submit">Send</button>
-      </form>
+        <button onClick={sendMessage} className="send-button">
+          Send
+        </button>
+      </div>
     </div>
   );
 };
 
-export default App;
+export default ChatApp;

@@ -64,7 +64,6 @@ def generate_chat_stream(user_message, context):
     model_response = results[list(results.keys())[0]]
     updated_context += f"\nBot: {model_response}"  # Update context with the bot's response
 
-    # Print responses to the terminal
     yield f"data: {model_response}\n\n"  # Send the response as a stream
     yield f"data: {updated_context}\n\n"  # Optionally stream updated context
 
