@@ -1,36 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
-import { AlertTriangle, Heart, Activity, Brain } from 'lucide-react';
+import { AlertTriangle, Heart, Activity, Brain, Image as ImageIcon } from 'lucide-react';
 import './App.css';
-
-const QUESTIONS = {
-  healthAnalysis: [
-    "What's your age?",
-    "What's your weight (in kg)?",
-    "What's your height (in cm)?",
-    "What's your typical blood pressure (systolic/diastolic)?",
-    "What's your typical heart rate?",
-    "Do you have any family history of chronic diseases?",
-    "Can you describe your typical daily diet?",
-    "How many hours do you sleep on average?",
-    "Do you have any known medical conditions?",
-    "How would you describe your daily activity level?",
-  ],
-  friendlyCompanion: [
-    "How are you feeling today? (1-10)",
-    "Could you tell me what's been on your mind lately?",
-    "How has your sleep been recently?",
-    "What are your stress levels like? (1-10)",
-    "Have you been able to maintain your daily routines?",
-    "Is there anything specific you'd like support with today?",
-  ],
-};
 
 const ChatApp = () => {
   const [activeTab, setActiveTab] = useState('healthAnalysis');
   const [input, setInput] = useState('');
-  const [questionIndex, setQuestionIndex] = useState(0);
   const [userData, setUserData] = useState({
     healthAnalysis: {},
     friendlyCompanion: {},
@@ -41,14 +17,26 @@ const ChatApp = () => {
     emergencySupport: [],
   });
   const [emergency, setEmergency] = useState(false);
-  const [isInteracting, setIsInteracting] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [stream, setStream] = useState(null);
+  const [selectedImage, setSelectedImage] = useState(null);
   const messagesEndRef = useRef(null);
   const videoRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const handleEmergency = () => {
     setEmergency(true);
+  };
+
+  const handleImageUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setSelectedImage(e.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const startEmergencyCall = () => {
@@ -73,9 +61,14 @@ const ChatApp = () => {
   };
 
   const sendMessage = async () => {
-    if (input.trim() === '') return;
+    if (input.trim() === '' && !selectedImage) return;
 
-    const userMessage = { sender: 'user', text: input };
+    const userMessage = {
+      sender: 'user',
+      text: input,
+      image: selectedImage,
+    };
+
     setMessages(prev => ({
       ...prev,
       [activeTab]: [...prev[activeTab], userMessage],
@@ -93,97 +86,47 @@ const ChatApp = () => {
       return;
     }
 
-    if (isInteracting) {
-      // Send the user message to Gemini AI
-      try {
-        const geminiResponse = await axios.post('http://localhost:5000/api/gemini-ai', {
-          userInput: JSON.stringify({
-            type: activeTab,
-            data: userData[activeTab],
-            userMessage: input,
-          }),
+    try {
+      const payload = {
+        userInput: JSON.stringify({
+          type: activeTab,
+          userMessage: input,
           userData: userData[activeTab],
-        });
+          image: selectedImage,
+        }),
+      };
 
-        if (geminiResponse.data && geminiResponse.data.result) {
-          setMessages(prev => ({
-            ...prev,
-            [activeTab]: [...prev[activeTab], {
-              sender: 'bot',
-              text: geminiResponse.data.result,
-            }],
-          }));
-        }
-      } catch (error) {
-        console.error("Error during Gemini API call:", error);
+      const response = await axios.post('http://localhost:5000/api/gemini-ai', payload);
+
+      if (response.data && response.data.result) {
         setMessages(prev => ({
           ...prev,
           [activeTab]: [...prev[activeTab], {
             sender: 'bot',
-            text: 'I apologize, but there was an error processing your message. Please try again.',
+            text: response.data.result,
           }],
         }));
-      }
-    } else {
-      // Handle the regular question answering flow
-      const newData = {
-        ...userData[activeTab],
-        [QUESTIONS[activeTab][questionIndex]]: input,
-        timestamp: new Date().toISOString(),
-      };
 
-      setUserData(prev => ({
-        ...prev,
-        [activeTab]: newData,
-      }));
-
-      setInput('');
-
-      if (questionIndex < QUESTIONS[activeTab].length - 1) {
-        const nextQuestion = QUESTIONS[activeTab][questionIndex + 1];
-        setMessages(prev => ({
-          ...prev,
-          [activeTab]: [...prev[activeTab], { sender: 'bot', text: nextQuestion }],
-        }));
-        setQuestionIndex(questionIndex + 1);
-      } else {
-        // API call for analysis
-        try {
-          const analysisResponse = await axios.post('http://localhost:5000/api/analyze-text', {
-            prompt: `As Dr. Garuda, provide ${activeTab === 'healthAnalysis' ? 'a comprehensive health analysis' : 'compassionate mental health support'} based on: ${JSON.stringify(newData)}`,
-            type: activeTab,
-            userData: newData,
-          });
-
-          if (analysisResponse.data.emergency) {
-            handleEmergency();
-          }
-
-          setMessages(prev => ({
-            ...prev,
-            [activeTab]: [...prev[activeTab], {
-              sender: 'bot',
-              text: analysisResponse.data.result,
-              emergency: analysisResponse.data.emergency,
-            }],
-          }));
-
-          // Switch to interaction mode with Gemini AI
-          setIsInteracting(true);
-          setQuestionIndex(0);
-        } catch (error) {
-          console.error("Error during API call:", error);
-          setMessages(prev => ({
-            ...prev,
-            [activeTab]: [...prev[activeTab], {
-              sender: 'bot',
-              text: 'I apologize, but there was an error processing your information. Please try again.',
-            }],
-          }));
+        if (response.data.emergency) {
+          handleEmergency();
         }
       }
+    } catch (error) {
+      console.error("Error during API call:", error);
+      setMessages(prev => ({
+        ...prev,
+        [activeTab]: [...prev[activeTab], {
+          sender: 'bot',
+          text: 'I apologize, but there was an error processing your message. Please try again.',
+        }],
+      }));
     }
 
+    setInput('');
+    setSelectedImage(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
     scrollToBottom();
   };
 
@@ -199,7 +142,12 @@ const ChatApp = () => {
     if (!messages[activeTab]?.length) {
       setMessages(prev => ({
         ...prev,
-        [activeTab]: [{ sender: 'bot', text: QUESTIONS[activeTab]?.[0] || '' }]
+        [activeTab]: [{
+          sender: 'bot',
+          text: activeTab === 'healthAnalysis'
+            ? "Hi! I'm Dr. Garuda. How can I help you with your health today?"
+            : "Hello! I'm here to support you. How are you feeling?",
+        }],
       }));
     }
   }, [activeTab]);
@@ -257,6 +205,9 @@ const ChatApp = () => {
             <div key={index} className={`chat-entry ${msg.sender}`}>
               <div className={`message ${msg.sender === 'user' ? 'user-message' : 'bot-message'}`}>
                 <ReactMarkdown>{msg.text}</ReactMarkdown>
+                {msg.image && (
+                  <img src={msg.image} alt="User uploaded" className="message-image" />
+                )}
                 {msg.emergency && (
                   <div className="emergency-resources">
                     <h4>Emergency Resources:</h4>
@@ -284,17 +235,52 @@ const ChatApp = () => {
       )}
 
       <div className="chat-form">
-        <input
-          type="text"
-          placeholder="Type your response..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-          className="chat-input"
-        />
-        <button onClick={sendMessage} className="send-button">
-          Send
-        </button>
+        <div className="input-container flex items-center w-full bg-white rounded-lg shadow-sm">
+          <input
+            type="text"
+            placeholder="Type your message..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+            className="chat-input flex-grow px-4 py-2 border-none focus:outline-none rounded-l-lg"
+          />
+          <div className="flex items-center px-2">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              className="hidden"
+              ref={fileInputRef}
+              id="image-upload"
+            />
+            <label
+              htmlFor="image-upload"
+              className={`cursor-pointer p-2 rounded-full hover:bg-gray-100 transition-colors ${selectedImage ? 'text-blue-500' : 'text-gray-500'}`}
+            >
+              <ImageIcon className="w-5 h-5" />
+            </label>
+            <button
+              onClick={sendMessage}
+              className="send-button ml-2 bg-blue-500 text-white px-4 py-2 rounded-r-lg hover:bg-blue-600 transition-colors"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+        {selectedImage && (
+          <div className="image-preview absolute bottom-full mb-2 left-0 bg-white p-2 rounded-lg shadow-lg">
+            <img src={selectedImage} alt="Preview" className="h-20 object-contain" />
+            <button
+              onClick={() => {
+                setSelectedImage(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}
+              className="delete-preview absolute top-0 right-0 text-red-500 text-sm p-1 hover:bg-gray-200 rounded-full"
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
