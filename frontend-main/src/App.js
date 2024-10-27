@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
 import { AlertTriangle, Heart, Activity, Brain, Image as ImageIcon } from 'lucide-react';
-import io from 'socket.io-client'; // Import Socket.IO for signaling
 import './App.css';
 
 const ChatApp = () => {
@@ -24,28 +23,6 @@ const ChatApp = () => {
   const messagesEndRef = useRef(null);
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
-  const socket = useRef(null); // Reference to the socket
-
-  // Socket.IO connection setup
-  useEffect(() => {
-    socket.current = io('http://your-ngrok-url'); // Replace with your ngrok URL
-
-    socket.current.on('offer', async (offer) => {
-      await handleOffer(offer);
-    });
-
-    socket.current.on('answer', (answer) => {
-      handleAnswer(answer);
-    });
-
-    socket.current.on('ice-candidate', (candidate) => {
-      handleNewICECandidate(candidate);
-    });
-
-    return () => {
-      socket.current.disconnect();
-    };
-  }, []);
 
   const handleEmergency = () => {
     setEmergency(true);
@@ -62,69 +39,25 @@ const ChatApp = () => {
     }
   };
 
-  const startEmergencyCall = async () => {
+  const startEmergencyCall = () => {
     setIsConnecting(true);
-    const peerConnection = new RTCPeerConnection();
-
-    // Get video and audio stream
-    const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    videoRef.current.srcObject = mediaStream;
-
-    mediaStream.getTracks().forEach((track) => {
-      peerConnection.addTrack(track, mediaStream);
-    });
-
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.current.emit('ice-candidate', event.candidate);
-      }
-    };
-
-    // Create offer and send it to the signaling server
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-    socket.current.emit('offer', { offer });
-
-    // Listen for answer from signaling server
-    peerConnection.ontrack = (event) => {
-      const remoteStream = event.streams[0];
-      videoRef.current.srcObject = remoteStream;
-    };
-  };
-
-  const handleOffer = async (offer) => {
-    const peerConnection = new RTCPeerConnection();
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-
-    const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    mediaStream.getTracks().forEach((track) => {
-      peerConnection.addTrack(track, mediaStream);
-    });
-
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.current.emit('ice-candidate', event.candidate);
-      }
-    };
-
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    socket.current.emit('answer', { answer });
-
-    peerConnection.ontrack = (event) => {
-      const remoteStream = event.streams[0];
-      videoRef.current.srcObject = remoteStream;
-    };
-  };
-
-  const handleAnswer = (answer) => {
-    const peerConnection = new RTCPeerConnection();
-    peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-  };
-
-  const handleNewICECandidate = (candidate) => {
-    const peerConnection = new RTCPeerConnection();
-    peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(mediaStream => {
+        setStream(mediaStream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
+      })
+      .catch(error => {
+        console.error("Error accessing webcam: ", error);
+        setMessages(prev => ({
+          ...prev,
+          emergencySupport: [...prev.emergencySupport, {
+            sender: 'bot',
+            text: 'Unable to access webcam. Please ensure you have granted camera permissions.',
+          }],
+        }));
+      });
   };
 
   const sendMessage = async () => {
@@ -142,7 +75,7 @@ const ChatApp = () => {
     }));
 
     if (activeTab === 'emergencySupport') {
-      startEmergencyCall(); // Start the emergency call
+      startEmergencyCall();
       setInput('');
       setTimeout(() => {
         setMessages(prev => ({
@@ -312,7 +245,7 @@ const ChatApp = () => {
             className="chat-input flex-grow px-4 py-2 border-none focus:outline-none rounded-l-lg"
           />
           <div className="flex items-center px-2">
-            {activeTab === 'healthAnalysis' && (
+            {activeTab === 'healthAnalysis' && (  // Show file input only in Health Analysis tab
               <>
                 <input
                   type="file"
