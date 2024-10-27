@@ -124,6 +124,8 @@
   gap: 1rem;
   padding: 1.5rem;
   border-top: 1px solid #e5e7eb;
+  background: #f9fafb; /* Slightly lighter background */
+  border-radius: 0 0 12px 12px; /* Rounded corners at the bottom */
 }
 
 .chat-input {
@@ -134,10 +136,12 @@
   font-size: 1rem;
   outline: none;
   transition: border-color 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); /* Soft shadow */
 }
 
 .chat-input:focus {
-  border-color: #2563eb;
+  border-color: #2563eb; /* Highlight border on focus */
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2); /* Focus ring */
 }
 
 .send-button {
@@ -149,14 +153,45 @@
   font-weight: 500;
   cursor: pointer;
   transition: background-color 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); /* Soft shadow */
 }
 
 .send-button:hover {
-  background: #1d4ed8;
+  background: #1d4ed8; /* Darker blue on hover */
 }
 
 .send-button:active {
-  background: #1e40af;
+  background: #1e40af; /* Even darker on click */
+}
+
+/* Image Preview Styles */
+.image-preview {
+  position: relative;
+  margin-top: 0.5rem; /* Spacing above the preview */
+  padding: 0.5rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); /* Soft shadow */
+}
+
+/* Delete Preview Button Styles */
+.delete-preview {
+  position: absolute;
+  top: 0;
+  right: 0;
+  color: #dc2626; /* Red color for delete button */
+  background: white;
+  border-radius: 50%;
+  border: 1px solid #e5e7eb; /* Subtle border */
+  cursor: pointer;
+  padding: 0.2rem;
+  transition: background-color 0.2s ease;
+}
+
+/* Delete Button Hover Effect */
+.delete-preview:hover {
+  background: #f3f4f6; /* Light gray on hover */
 }
 
 /* Video Call UI Styles */
